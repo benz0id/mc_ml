@@ -9,6 +9,11 @@ import torch
 
 
 def block_to_rep(block: Block) -> str:
+    """
+    Converts an anvil block to a string rep.
+
+    e.g. minecraft:dirt[snowy=false,variant=podzol]
+    """
     if block.properties:
         props = str(block.properties)
     else:
@@ -16,6 +21,9 @@ def block_to_rep(block: Block) -> str:
     return f'{block.id}\t{props}'.replace('\'', '').strip()
 
 def rep_to_block(rep: str) -> Block:
+    """
+    Inverse function of block_to_rep, always maps to new block objects.
+    """
     s =  rep.split('\t')
     if len(s) > 1:
         block, props = s
@@ -108,8 +116,8 @@ def parse_json_files(directory: str) -> List[Block]:
                         block = Block(namespace=namespace, block_id=block_id,
                                       properties=properties)
                         blocks.append(block)
+                # Handle case where variant_data is a single dictionary (most cases)
                 else:
-                    # Handle case where variant_data is a single dictionary (most cases)
                     model_name = variant_data.get('model')
                     if not model_name or ':' not in model_name:
                         print('Discarding', model_name)
@@ -218,6 +226,11 @@ class BlockIDMapper:
         return torch.gather(self.added_ids_to_final_id, 0, unique)
 
     def get_block_id(self, block: Block):
+        """
+        Gets the current blocks mapping. If the map has not been seen before
+        (by any threads), create a new entry in the dictionary and return
+        that value.
+        """
         rep = block_to_rep(block)
 
         if rep not in self._rep_to_id:

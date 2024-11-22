@@ -16,7 +16,8 @@ def add(d, k, v):
 class PipelineTimer:
 
     """
-    Allows for convenient calculation and presentation of multistep pipelines.
+    Allows for convenient calculation and presentation of multistep pipeline
+    timings..
     """
 
     epoch_to_step_times: Dict[int, List[Tuple[str, float]]]

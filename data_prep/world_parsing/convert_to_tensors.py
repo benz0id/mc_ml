@@ -36,8 +36,21 @@ def _nibble_array(byte_array) -> torch.tensor:
 
 class TensorConverter:
     """
-    Converts minecraft worlds to tensor objects.
+    Converts minecraft worlds into tensor objects.
+
+    _block_mapper:
+        Maps the block name and state provided in the minecraft file into an
+        integer.
+    verbose:
+        Display additional information.
+    num_cores:
+        Number of cores to use when converting to tensors. Scales extremely
+        well.
     """
+
+    _block_mapper: BlockIDMapper
+    verbose: bool
+    num_cores: int
 
     def __init__(
             self,
@@ -48,20 +61,32 @@ class TensorConverter:
         self.verbose = verbose
         self.num_cores =num_cores
 
-    # ===== Minecraft -> Pytorch ======
+    # ===== Minecraft -> Pytorch Conversion ======
 
     def region_to_tensors(self, region: Union[Region, Path],
                           section_dims: int = 32,
                           verbose: bool = True,
-                          version: str = 'org') \
+                          version: str = 'vectorized') \
             -> List[List[Union[None, torch.tensor]]]:
         """
-        Converts all chunks in the given region into tensors.
+        Convert a region into a matrix of tensors.
 
-        :param region: A region in a minecraft world.
+        Parameters
+        ----------
+        region
+            Anvil region or path to region.
+        section_dims
+            Chunk dimensions of region.
+        verbose
+            Display progress.
+        version
+            Conversion algorithm version. "vectorized" | "org".
+            Vectorized is faster, org is more versatile.
 
-        :return: An array of tensors indexable by [x, z] coords of the chunk.
-                Chunks that are not yet generated are marked by None.
+        Returns
+            Nested lists containing parsed chunks.
+        -------
+
         """
         if isinstance(region, Path):
             region = anvil.region.Region.from_file(str(region))
@@ -86,13 +111,22 @@ class TensorConverter:
             chunks[x].append(chunk)
         return chunks
 
-    def chunk_to_tensor(self, chunk: Chunk, version: str = 'org') -> torch.tensor:
+    def chunk_to_tensor(self, chunk: Chunk, version: str = 'vectorized') -> torch.tensor:
         """
-        Converts the given chunk into a pytorch tensor.
+        Convert a minecraft chunk into a tensor.
 
-        :param chunk: A chunk in minecraft world.
+        Parameters
+        ----------
+        chunk
+            Anvil chunk object.
+        version
+            Conversion algorithm version. "vectorized" | "org".
+            Vectorized is faster, org is more versatile.
 
-        :return: a tensor with shape [16, 64 + 320, 16]
+        Returns
+            Tensor representation of the chunk.
+        -------
+
         """
         if version == 'org':
             stream = chunk.stream_chunk()
@@ -130,12 +164,26 @@ class TensorConverter:
                                overwrite: bool = True,
                                version: str = 'vectorized') -> TorchWorld:
         """
-        Converts all chunks in a given world into sparse pytorch tensors.
+        Convert a minecraft world's chunks into pytorch tensors.
 
-        :param world_path: Path to the world file.
-        :param out_path: Path in which to store converted chunks.
-        :param overwrite: Overwrite existing files.
+        Parameters
+        ----------
+        world_path
+            Path to world file to be converted.
+        out_path
+            Path in which to store output chunk tensors.
+        overwrite
+            Whether to overwrite existing chunk tensors.
+        version
+            Conversion algorithm version. "vectorized" | "org".
+            Vectorized is faster, org is more versatile.
+
+
+        Returns
+            TorchWorld obj for accessing with the converted file.
+        -------
         """
+
 
         out_path.mkdir(exist_ok=True)
 
@@ -194,6 +242,28 @@ class TensorConverter:
                           z: int = 0,
                           verbose: bool = True) \
         -> anvil.empty_region.EmptyRegion:
+        """
+        Convert an array of tensors into an anvil Region.
+
+        Parameters
+        ----------
+        tensors
+            Nested list of pytorch tensors, as produced by
+            <self.region_to_tensors>. To be converted to region.
+        version
+            Integer representation of the output world's version.
+        x
+            X coordinate of the output region.
+        z
+            Z coordinate of the output region.
+        verbose
+            Display progress.
+
+        Returns
+            Anvil region containing the given blocks.
+        -------
+
+        """
         assert tensors
 
         region = anvil.empty_region.EmptyRegion(x, z)
@@ -218,6 +288,23 @@ class TensorConverter:
                         x: int = 0,
                         z: int = 0) \
             -> anvil.empty_chunk.EmptyChunk:
+        """
+        Parameters
+        ----------
+        tensor
+            The tensor to convert into a chunk.
+        version
+            Minecraft version number to assign chunk.
+        x
+            X coordinate of the chunk.
+        z
+            Z coordinate of the chunk.
+
+        Returns
+            The converted anvil chunk.
+        -------
+
+        """
 
         chunk = anvil.empty_chunk.EmptyChunk(x, z, version)
 
@@ -230,7 +317,24 @@ class TensorConverter:
 
     def torch_world_to_world(self,
                              torch_world: TorchWorld,
-                             out_world: Path):
+                             out_world: Path) -> None:
+        """
+        Convert a torch world back into a minecraft world.
+
+        Parameters
+        ----------
+        torch_world
+            interface to chunk tensors to be converted back into a minecraft
+            world.
+        out_world
+            The output world file. Note that this world file will not be
+            complete.
+
+        Returns
+            None
+        -------
+
+        """
         with ProcessPoolExecutor(max_workers=self.num_cores) as executor:
             futures = []
 
@@ -250,6 +354,9 @@ class TensorConverter:
                           out_path: Path,
                           x: int,
                           z: int):
+        """
+        Helper for the above
+        """
         tensors = torch_world.get_region(x, z)
         region = self.tensors_to_region(tensors, IMP_VERSION)
         region.save(str(out_path / 'region' / f'r.{x}.{z}.mca'))
@@ -259,56 +366,67 @@ class TensorConverter:
     def _get_chunk_vectorized(self, chunk: Chunk) -> torch.tensor:
         sections = []
         for section in _section_height_range(chunk.version):
-            sections.append(
-                self._get_blocks_vectorized(chunk, section))
+
+            # This chunk is pre-flattening. Handle accordingly.
+            if chunk.version < VERSION_17w47a:
+                sections.append(
+                    self._get_blocks_pre_flattening(section)
+                )
+
+            # Empty section, return all air.
+            elif 'BlockStates' not in section:
+                sections.append(torch.zeros((16, 16, 16), dtype=torch.int16))
+
+            # This chunk is post flattening - handle accordingly.
+            else:
+                sections.append(
+                    self._get_blocks_post_flattening(chunk, section)
+                )
+
+
+
         return torch.cat(sections, dim=1)
 
+    def _get_blocks_pre_flattening(self, section: Union[int, nbt.TAG_Compound] = None
+                              ) -> torch.tensor:
+        if section is None or 'Blocks' not in section:
+            block_ids = (torch.zeros(4096, dtype=torch.uint8)
+                         .reshape((16, 16, 16))
+                         .permute(2, 0, 1))
+            return block_ids
 
-    def _get_blocks_vectorized(self, chunk: Chunk,
+        block_ids = torch.frombuffer(bytearray(section['Blocks']),
+                                     dtype=torch.int8)
+        if 'Add' in section:
+            block_ids += _nibble_array(bytearray(section['Add']))
+        data = _nibble_array(bytes(section['Data']))
+
+        ids = self._block_mapper.map_legacy(block_ids.to(torch.int64),
+                                            data.to(torch.int64))
+        return ids.reshape((16, 16, 16)).permute(2, 0, 1)
+
+
+
+    def _get_blocks_post_flattening(self, chunk: Chunk,
                                section: Union[int, nbt.TAG_Compound] = None
                               ) -> torch.tensor:
-
-        if section is None or isinstance(section, int):
-            section = chunk.get_section(section or 0)
-
-        if chunk.version < VERSION_17w47a:
-            if section is None or 'Blocks' not in section:
-                block_ids = (torch.zeros(4096, dtype=torch.uint8)
-                             .reshape((16, 16, 16))
-                             .permute(2, 0, 1))
-                return block_ids
-
-            block_ids = torch.frombuffer(bytearray(section['Blocks']), dtype=torch.int8)
-            if 'Add' in section:
-                block_ids += _nibble_array(bytearray(section['Add']))
-            data = _nibble_array(bytes(section['Data']))
-
-            ids = self._block_mapper.map_legacy(block_ids.to(torch.int64),
-                                  data.to(torch.int64))
-            return ids.reshape((16, 16, 16)).permute(2, 0, 1)
-
-        if section is None or 'BlockStates' not in section:
-            return torch.zeros((16, 16, 16), dtype=torch.int16)
-
-        states = section['BlockStates'].value
         palette = section['Palette']
-
 
         ids = torch.zeros(len(palette), dtype=torch.int16)
         for i, p in enumerate(palette):
             ids[i] = self._block_mapper.get_block_id(Block.from_palette(p))
 
-
         bits_per_val = max((len(palette) - 1).bit_length(), 4)
-        stretches = chunk.version < VERSION_20w17a
 
+        # Whether the block ids stretch across the integers.
+        stretches = chunk.version < VERSION_20w17a
         if not stretches:
             cutoff = 64 - (64 // bits_per_val) * bits_per_val
         else:
             cutoff = 64
-
         i = 0
         bits = bitarray(len(section['BlockStates'].value) * 64)
+
         # Format into stream of bits with the packed size rep.
         for num in section['BlockStates'].value:
 
@@ -328,6 +446,7 @@ class TensorConverter:
 
         # Map tensor to block ids using the keys.
         unpacked_array = torch.gather(ids, 0, unpacked_array.to(torch.int64))
+
         # unpacked_array[drop] = 0
         return unpacked_array.reshape((16, 16, 16)).permute(2, 0, 1)
     

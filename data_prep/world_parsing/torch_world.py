@@ -114,22 +114,34 @@ class TorchWorld:
             self.regions.add((x, z))
 
     def get_chunk(self, x: int, z: int) -> torch.tensor:
+        """
+        Get the chunk tensor at the given coordinates.
+        """
         if (x, z) in self.chunks:
             return torch.load(self.world_path / f'{x}.{z}.pt')
         else:
             return None
 
     def delete_chunk(self, x: int, z: int) -> torch.tensor:
+        """
+        Delete the chunk tensor at the given coordinates.
+        """
         if (x, z) not in self.chunks:
             raise ValueError('Unknown chunk')
         self.chunks.remove((x, z))
         os.system(f'rm {str(self.world_path / f'{x}.{z}.pt')}')
 
     def set_chunk(self, tensor: torch.tensor, x: int, z: int) -> None:
+        """
+        Save the given tensor as a chunk at the given coordinates. Overwrites.
+        """
         self._register_chunk(x, z)
         torch.save(tensor, self.world_path / f'{x}.{z}.pt')
 
     def get_region(self, x: int, z: int) -> List[List[torch.tensor]]:
+        """
+        Returns all chunks in the given region as an array of chunks.
+        """
         region = []
         x_off = x * 32
         z_off = z * 32
@@ -160,6 +172,25 @@ class TorchWorld:
 
     def iterate_chunk_trios(self) \
             -> Iterable[Tuple[torch.tensor, torch.tensor, torch.tensor]]:
+        """
+        Iterates over all "trios" of chunks X, X, Y where the relative positions
+        of the chunks are:
+
+                 X
+                XY
+
+                XY
+                 X
+
+                 YX
+                 X
+
+                 X
+                 YX
+        Useful for chunk-based training approaches.
+        -------
+
+        """
 
         for chunk in self.chunks:
             for chunks in self._get_neighbor_tuples(ChunkCoords(*chunk)):

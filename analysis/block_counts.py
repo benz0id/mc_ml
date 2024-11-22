@@ -29,6 +29,8 @@ def create_pie_chart(data: pd.DataFrame,
     ValueError
         If the DataFrame does not have exactly two columns, or if the data
         types are not as expected.
+
+    ## GPT4
     """
     # Defensive programming: Check that the DataFrame has exactly two columns
     if data.shape[1] != 2:
@@ -87,8 +89,10 @@ def get_block_counts(chunks: Iterable[torch.tensor], mapper: BlockIDMapper) -> p
     """
     Provides the number of blocks in the given chunks.
 
-    :param chunks: An iterable list of chunk tensors.
-    :param mapper: The mapper used to encode the blocks.
+    chunks
+        An iterable list of chunk tensors.
+    mapper
+        The mapper used to encode the blocks.
 
     :return: block - count dataframe.
     """
