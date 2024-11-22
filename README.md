@@ -1,6 +1,6 @@
 # Applying Diffusion Models for Minecraft World Generation
 
-Currently implements efficient world -> tensor conversion and tensor manipulation, to allow for the constrution of training sets from minecraft worlds.
+Currently implements efficient minecraft world -> tensor conversion and tensor manipulation, to allow for the constrution of training sets from minecraft worlds.
 
 ## Installation 
 
