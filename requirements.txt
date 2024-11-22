@@ -1,0 +1,7 @@
+anvil_parser2==0.10.6
+bitarray==2.9.2
+matplotlib==3.9.2
+NBT==1.5.1
+pandas==2.2.3
+torch==2.4.1
+tqdm==4.66.2
